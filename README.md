@@ -1,4 +1,5 @@
-Optimized CGInclude files.
+Optimized CGInclude files
+
 Introduction:
 Writing custom PBR Shaders(include standard surface shaders) usually will call the lightingStandard functions in CGIncludes. However, there are lots of performance defection in Unity's default cginc. Thus, this project deeply optimized the lighting calculation functions in cginc files. Include deferred rendering path PBS functions, forward rendering path(forward base pass and forward add pass) PBS functions and Standard BRDF functions.
 
