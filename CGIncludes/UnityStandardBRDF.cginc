@@ -33,47 +33,55 @@ float SmoothnessToPerceptualRoughness(float smoothness)
 
 //-------------------------------------------------------------------------------------
 
-inline half Pow4 (half x)
+inline float Pow4 (float x)
 {
-    return x*x*x*x;
+    float x2 = x * x;
+    return x2 * x2;
 }
 
 inline float2 Pow4 (float2 x)
 {
-    return x*x*x*x;
+    float2 x2 = x * x;
+    return x2 * x2;
 }
 
-inline half3 Pow4 (half3 x)
+inline float3 Pow4 (float3 x)
 {
-    return x*x*x*x;
+    float3 x2 = x * x;
+    return x2 * x2;
 }
 
-inline half4 Pow4 (half4 x)
+inline float4 Pow4 (float4 x)
 {
-    return x*x*x*x;
+    float4 x2 = x * x;
+    return x2 * x2;
 }
 
 // Pow5 uses the same amount of instructions as generic pow(), but has 2 advantages:
 // 1) better instruction pipelining
 // 2) no need to worry about NaNs
-inline half Pow5 (half x)
+inline float Pow5 (float x)
 {
-    return x*x * x*x * x;
+    float x2 = x * x;
+    return x2 * x2 * x;
 }
 
-inline half2 Pow5 (half2 x)
+inline float2 Pow5 (float2 x)
 {
-    return x*x * x*x * x;
+    float2 x2 = x * x;
+    return x2 * x2 * x;
 }
 
-inline half3 Pow5 (half3 x)
+inline float3 Pow5 (float3 x)
 {
-    return x*x * x*x * x;
+    float3 x2 = x * x;
+    return x2 * x2 * x;
 }
 
-inline half4 Pow5 (half4 x)
+inline float4 Pow5 (float4 x)
 {
-    return x*x * x*x * x;
+    float4 x2 = x * x;
+    return x2 * x2 * x;
 }
 
 inline half3 FresnelTerm (half3 F0, half cosA)
@@ -232,25 +240,8 @@ half4 BRDF1_Unity_PBS (half3 diffColor, half3 specColor, half oneMinusReflectivi
     float perceptualRoughness = SmoothnessToPerceptualRoughness (smoothness);
     float3 halfDir = Unity_SafeNormalize (float3(light.dir) + viewDir);
 
-// NdotV should not be negative for visible pixels, but it can happen due to perspective projection and normal mapping
-// In this case normal should be modified to become valid (i.e facing camera) and not cause weird artifacts.
-// but this operation adds few ALU and users may not want it. Alternative is to simply take the abs of NdotV (less correct but works too).
-// Following define allow to control this. Set it to 0 if ALU is critical on your platform.
-// This correction is interesting for GGX with SmithJoint visibility function because artifacts are more visible in this case due to highlight edge of rough surface
-// Edit: Disable this code by default for now as it is not compatible with two sided lighting used in SpeedTree.
-#define UNITY_HANDLE_CORRECTLY_NEGATIVE_NDOTV 0
+    half nv = dot(normal, viewDir);    // This abs allow to limit artifact
 
-#if UNITY_HANDLE_CORRECTLY_NEGATIVE_NDOTV
-    // The amount we shift the normal toward the view vector is defined by the dot product.
-    half shiftAmount = dot(normal, viewDir);
-    normal = shiftAmount < 0.0f ? normal + viewDir * (-shiftAmount + 1e-5f) : normal;
-    // A re-normalization should be applied here but as the shift is small we don't do it to save ALU.
-    //normal = normalize(normal);
-
-    half nv = dot(normal, viewDir); // TODO: this saturate should no be necessary here
-#else
-    half nv = abs(dot(normal, viewDir));    // This abs allow to limit artifact
-#endif
 
     half nl = saturate(dot(normal, light.dir));
     float nh = saturate(dot(normal, halfDir));
@@ -297,13 +288,9 @@ half4 BRDF1_Unity_PBS (half3 diffColor, half3 specColor, half oneMinusReflectivi
         surfaceReduction = 1.0 / (roughness*roughness + 1.0);           // fade \in [0.5;1]
 #   endif
 #endif
-    // To provide true Lambert lighting, we need to be able to kill specular completely.
-    specularTerm *= any(specColor) ? 1.0 : 0.0;
-
 
     #if UNITY_PASS_FORWARDADD
-     half3 color =   diffColor * (light.color * diffuseTerm)
-                    + specularTerm * light.color * FresnelTerm (specColor, lh);
+     half3 color =   (diffColor * diffuseTerm + specularTerm * FresnelTerm (specColor, lh)) * light.color;
     #else
     half grazingTerm = saturate(smoothness + (1-oneMinusReflectivity));
     half3 color =   diffColor * (gi.diffuse + light.color * diffuseTerm)
