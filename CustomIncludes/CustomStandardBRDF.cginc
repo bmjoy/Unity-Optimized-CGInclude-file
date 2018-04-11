@@ -1,5 +1,6 @@
-#ifndef UNITY_STANDARD_BRDF_INCLUDED
-#define UNITY_STANDARD_BRDF_INCLUDED
+
+#ifndef CUSTOM_STANDARD_BRDF_INCLUDED
+#define CUSTOM_STANDARD_BRDF_INCLUDED
 
 #include "UnityCG.cginc"
 #include "UnityStandardConfig.cginc"
