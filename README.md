@@ -15,7 +15,5 @@ Writing custom PBR Shaders(include standard surface shaders) usually will call t
 3. Do not use "Lighting.cginc", "UnityGlobalIllumination.cginc", "UnityImageBasedLighting.cginc", "UnityPBSLighting.cginc" or "UnityStandardBRDF.cginc" in your shaders! That will cause an conflict!
 4. You do not have to change any other code in your shaders!.
 
-## TODO List in the future:
-1. Fast PBR functions for PC;
-2. Fast PBR functions for Mobile;
-3. Subsurface Scattering Skin shader and post processing  (different from Unity official HDRP)
+## New Features:
+ Add "UnityShaderLibrary.cginc" to the native cginclude. By transform unity's original shadow algorithm to next-generation PCSS algorithm, the point lights and spot lights' shadow will be much better. However, it will cost more gpu resources in mobile platform.

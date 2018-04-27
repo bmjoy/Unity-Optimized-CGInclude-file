@@ -21,7 +21,7 @@ half    UnitySampleShadowmap_PCF5x5(float4 coord, float3 receiverPlaneDepthBias)
 half    UnitySampleShadowmap_PCF3x3(float4 coord, float3 receiverPlaneDepthBias);   // Samples the shadowmap based on PCF filtering (3x3 kernel)
 float3  UnityGetReceiverPlaneDepthBias(float3 shadowCoord, float biasbiasMultiply); // Receiver plane depth bias
 
-//NGSS START --------------------------------------------------------------------------------------------------------------------------------------------------------------
+//SOFTSHADOW START --------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 // Tip: To enable a feature uncomment the #define line. To disable a feature comment the #define line.
 
@@ -31,28 +31,24 @@ float3  UnityGetReceiverPlaneDepthBias(float3 shadowCoord, float biasbiasMultipl
 //#define POISSON_32 																//Desktop VR / Consoles
 #define POISSON_64 																	//Desktop
 
-#if (defined(POISSON_32) || defined(POISSON_64))									//We dont need to bail out lower than 32 samplers
-#define NGSS_USE_EARLY_BAILOUT_OPTIMIZATION											//Optimize shadows performance by skipping fragments that are either 100% lit or 100% shadowed. Some macro noisy artefacts can be seen if shadows are too soft or sampling amount is below 64.
-#endif
+#define SOFTSHADOW_USE_BIAS_FADE															//Bias Fade		
+#define SOFTSHADOW_BIAS_FADE 0.015
 
-#define NGSS_USE_BIAS_FADE															//Bias Fade		
-#define NGSS_BIAS_FADE 0.015
+#define SOFTSHADOW_USE_POISSON_SAMPLING 													//Don't turn it off, will point light shadows look ugly as fak
+#define SOFTSHADOW_POISSON_SAMPLING_NOISE 10.0 											//Range between 0 and 10. Example: 0 gives 100 % Banding and 10 gives 100 % Noise. If value is 0 you better disable Poisson sampling completly, saves few instructions
+//#define SOFTSHADOW_USE_STATIC_NOISE 													//Improves noise patterns by sampling a noise texture in world space.
 
-#define NGSS_USE_POISSON_SAMPLING 													//Don't turn it off, will point light shadows look ugly as fak
-#define NGSS_POISSON_SAMPLING_NOISE 10.0 											//Range between 0 and 10. Example: 0 gives 100 % Banding and 10 gives 100 % Noise. If value is 0 you better disable Poisson sampling completly, saves few instructions
-//#define NGSS_USE_STATIC_NOISE 													//Improves noise patterns by sampling a noise texture in world space.
+#define SOFTSHADOW_GLOBAL_SOFTNESS_SPOT 1.0 												//currently does nothing (to be implemented)
+#define SOFTSHADOW_GLOBAL_SOFTNESS_POINT 1.0 												//currently does nothing (to be implemented)
 
-#define NGSS_GLOBAL_SOFTNESS_SPOT 1.0 												//currently does nothing (to be implemented)
-#define NGSS_GLOBAL_SOFTNESS_POINT 1.0 												//currently does nothing (to be implemented)
-
-#define NGSS_PCSS_FILTER_POINT_MIN 0.05 											//Close to blocker (If 0.0 == Hard Shadows). Warning: This value cannot be higher than NGSS_PCSS_FILTER_POINT_MAX
-#define NGSS_PCSS_FILTER_POINT_MAX 1.0 												//Far from blocker (If 1.0 == Soft Shadows). Warning: This value cannot be smaller than NGSS_PCSS_FILTER_POINT_MIN
+#define SOFTSHADOW_PCSS_FILTER_POINT_MIN 0.05 											//Close to blocker (If 0.0 == Hard Shadows). Warning: This value cannot be higher than SOFTSHADOW_PCSS_FILTER_POINT_MAX
+#define SOFTSHADOW_PCSS_FILTER_POINT_MAX 1.0 												//Far from blocker (If 1.0 == Soft Shadows). Warning: This value cannot be smaller than SOFTSHADOW_PCSS_FILTER_POINT_MIN
 
 uniform sampler2D unity_RandomRotation16;
 
-//NGSS SUPPORT
+//SOFTSHADOW SUPPORT
 #if (SHADER_TARGET < 30 || defined(SHADER_API_D3D9) || defined(SHADER_API_GLES) || defined(SHADER_API_PSP2) || defined(SHADER_API_N3DS))
-    #define NO_NGSS_SUPPORT
+    #define NO_SOFTSHADOW_SUPPORT
 #endif
 
 #if defined(POISSON_64) || defined(POISSON_128)
@@ -246,39 +242,39 @@ static const float2 PoissonDisksTest[16] =
 float3 LocalPoissonDisksOffsets[64];
 
 // Returns a random number based on a float3 and an index.
-float LocalRandInd(float3 seed, int i)
+inline float LocalRandInd(float3 seed, int i)
 {
 	float4 seed4 = float4(seed, i);
 	float dt = dot(seed4, float4(12.9898, 78.233, 45.164, 94.673));
 	return frac(sin(dt) * 43758.5453);
 }
 
-float LocalRand01(float3 seed)
+inline float LocalRand01(float3 seed)
 {
 	float dt = dot(seed, float3(12.9898, 78.233, 45.5432));// project seed on random constant vector   
 	return frac(sin(dt) * 43758.5453);// return only fractional part
 }
 
-int LocalRandInt(float3 seed, int maxInt)
+inline int LocalRandInt(float3 seed, int maxInt)
 {
 	return int((float(maxInt) * LocalRand01(seed), maxInt) % 16);//fmod() function equivalent as % operator
 }
 
-float LocalRandAngle(float3 seed)
+inline float LocalRandAngle(float3 seed)
 {
-	return LocalRand01(seed) * NGSS_POISSON_SAMPLING_NOISE;
+	return LocalRand01(seed) * SOFTSHADOW_POISSON_SAMPLING_NOISE;
 }
 
-float LocalRandAngle2(float2 seed)
+inline float LocalRandAngle2(float2 seed)
 {
 	float dt = dot(seed, float2(12.9898, 78.233));// project seed on random constant vector   
 	float frc = frac(sin(dt) * 43758.5453);// get only fractional part
-	return frc * NGSS_POISSON_SAMPLING_NOISE;
+	return frc * SOFTSHADOW_POISSON_SAMPLING_NOISE;
 }
 
-float3 LocalRandDir(float3 seed)
+inline float3 LocalRandDir(float3 seed)
 {
-	return (frac(sin(cross(seed, float3 (12.9898, 78.233, 45.5432))) * 43758.5453)*NGSS_POISSON_SAMPLING_NOISE + 0.0001);
+	return (frac(sin(cross(seed, float3 (12.9898, 78.233, 45.5432)) + _Time.xyz) * 43758.5453)*SOFTSHADOW_POISSON_SAMPLING_NOISE + 0.0001);
 }
 
 // ------------------------------------------------------------------
@@ -291,7 +287,7 @@ float3 LocalRandDir(float3 seed)
 	#if (SHADER_TARGET < 30  || UNITY_VERSION <= 565 || defined(SHADER_API_D3D9) || defined(SHADER_API_GLES) || defined(SHADER_API_PSP2) || defined(SHADER_API_N3DS))
 		//#define NO_INLINE_SAMPLERS_SUPPORT
 	#else
-		#define NGSS_CAN_USE_PCSS_FILTER
+		#define SOFTSHADOW_CAN_USE_PCSS_FILTER
 		SamplerState my_point_clamp_smp;
 	#endif
 
@@ -308,7 +304,7 @@ float3 LocalRandDir(float3 seed)
         #define SHADOWMAPSAMPLER_AND_TEXELSIZE_DEFINED
     #endif
 	
-	#if defined (NGSS_CAN_USE_PCSS_FILTER)
+	#if defined (SOFTSHADOW_CAN_USE_PCSS_FILTER)
 	float2 BLOCKER_SEARCH_SPOT(float4 coord, float diskRadius, float c, float s)
 	{
 		//BLOCKER SEARCH	
@@ -317,7 +313,7 @@ float3 LocalRandDir(float3 seed)
 				
 		for (int i = 0; i < 16; ++i)
 		{
-	#if defined(NGSS_USE_POISSON_SAMPLING)
+	#if defined(SOFTSHADOW_USE_POISSON_SAMPLING)
 			float2 rotatedOffset = float2(PoissonDisksTest[i].x * c + PoissonDisksTest[i].y * s, PoissonDisksTest[i].x * -s + PoissonDisksTest[i].y * c) * diskRadius;
 	#else
 			float2 rotatedOffset = PoissonDisksTest[i] * diskRadius;
@@ -333,26 +329,21 @@ float3 LocalRandDir(float3 seed)
 			
 			//blockerCount++;
 			//avgBlockerDistance += closestDepth;
-			
-	#if defined(NGSS_USE_EARLY_BAILOUT_OPTIMIZATION)
-				#if defined(UNITY_REVERSED_Z)
-				if (closestDepth > coord.z)
+			#if defined(UNITY_REVERSED_Z)
+				bool x = step (coord.z, closestDepth);
 				#else
-				if (closestDepth < coord.z)
+				bool x = step (closestDepth, coord.z);
 				#endif
-				{
-	#endif
-					blockerCount++;
-					avgBlockerDistance += closestDepth;
-	#if defined(NGSS_USE_EARLY_BAILOUT_OPTIMIZATION)
-				}
-	#endif
+
+					blockerCount += x;
+					avgBlockerDistance += closestDepth * x;
+
 		
 		}
 
 		return float2(avgBlockerDistance / blockerCount, blockerCount);
 	}
-	#endif//NGSS_CAN_USE_PCSS_FILTER
+	#endif//SOFTSHADOW_CAN_USE_PCSS_FILTER
 	
 	float PCF_FILTER_SPOT_TEST(float4 coord, float diskRadius, float c, float s)
 	{
@@ -361,7 +352,7 @@ float3 LocalRandDir(float3 seed)
 		for (int i = 0; i < 16; ++i)
 		{
 		
-	#if defined(NGSS_USE_POISSON_SAMPLING)
+	#if defined(SOFTSHADOW_USE_POISSON_SAMPLING)
 			float2 rotatedOffset = float2(PoissonDisksTest[i].x * c + PoissonDisksTest[i].y * s, PoissonDisksTest[i].x * -s + PoissonDisksTest[i].y * c) * diskRadius;
 	#else
 			float2 rotatedOffset = PoissonDisksTest[i] * diskRadius;
@@ -385,7 +376,7 @@ float3 LocalRandDir(float3 seed)
 		for (int i = 0; i < Samplers_Count; ++i)
 		{
 		
-	#if defined(NGSS_USE_POISSON_SAMPLING)
+	#if defined(SOFTSHADOW_USE_POISSON_SAMPLING)
 			float2 rotatedOffset = float2(PoissonDisks[i].x * c + PoissonDisks[i].y * s, PoissonDisks[i].x * -s + PoissonDisks[i].y * c) * diskRadius;
 	#else
 			float2 rotatedOffset = PoissonDisks[i] * diskRadius;
@@ -394,8 +385,8 @@ float3 LocalRandDir(float3 seed)
 	#if defined (SHADOWS_NATIVE)
 			result += UNITY_SAMPLE_SHADOW(_ShadowMapTexture, float4(coord.xy + rotatedOffset, coord.zw)).r;	
 	#else			
-		#if defined(NGSS_USE_BIAS_FADE)
-			float shadowsFade = NGSS_BIAS_FADE * _LightPositionRange.w;
+		#if defined(SOFTSHADOW_USE_BIAS_FADE)
+			float shadowsFade = SOFTSHADOW_BIAS_FADE * _LightPositionRange.w;
 			result += 1 - saturate((coord.z - SAMPLE_DEPTH_TEXTURE(_ShadowMapTexture, coord.xy + rotatedOffset).r) / shadowsFade);
 		#else
 			result += SAMPLE_DEPTH_TEXTURE(_ShadowMapTexture, coord.xy + rotatedOffset).r > coord.z ? 1.0 : 0.0;
@@ -414,7 +405,7 @@ float3 LocalRandDir(float3 seed)
 		// with "inconsistent sampler usage". Until that is fixed, just never compile
 		// multi-tap shadow variant on d3d11_9x.
 		
-		#if defined(NO_NGSS_SUPPORT)
+		#if defined(NO_SOFTSHADOW_SUPPORT)
 		return 1.0;
 		#endif
 
@@ -423,55 +414,26 @@ float3 LocalRandDir(float3 seed)
 
 		float4 coord = shadowCoord;
 		coord.xyz /= coord.w;
-		float s = 1.0;
-		float c = 1.0;
-
-	//#define NGSS_USE_STATIC_NOISE
-	#if defined(NGSS_USE_POISSON_SAMPLING)
-	#if defined(NGSS_USE_STATIC_NOISE)
-		float4 rotation = tex2D(unity_RandomRotation16, (coord.xy * 1000));
-		s = sin(rotation.x);
-		c = cos(rotation.y);
-	#else
 		float4 rotation = tex2D(unity_RandomRotation16, (coord.xy * 10));
-		float angle = LocalRandAngle(rotation.xyz);//screenPos.xyy
-		s = sin(angle);
-		c = cos(angle);
-	#endif
-	#endif
-
-		//float diskRadius = 0.5 / (1-_LightShadowData.r) / (shadowCoord.z / (_LightShadowData.z + _LightShadowData.w));
+		float angle = LocalRandAngle(rotation.xyz + _Time.xyz);//screenPos.xyy
+		float s = sin(angle);
+		float c = cos(angle);
 		float diskRadius = (1.0 - _LightShadowData.r);
 	
-	#if defined(SHADOWS_SOFT) && defined (NGSS_CAN_USE_PCSS_FILTER) && !defined (SHADER_API_D3D11_9X)
+	#if defined(SHADOWS_SOFT) && defined (SOFTSHADOW_CAN_USE_PCSS_FILTER) && !defined (SHADER_API_D3D11_9X)
 		
 		diskRadius *= 0.05;
 		
 		float2 distances = BLOCKER_SEARCH_SPOT(coord, diskRadius, c, s);
-		 
-		#if defined(NGSS_USE_EARLY_BAILOUT_OPTIMIZATION)
-		if( distances.y == 0.0 )//There are no occluders so early out (this saves filtering)
-			return 1.0;
-		else if (distances.y == 16.0)//There are 100% occluders so early out (this saves filtering)
-			return 0.0;
-		#endif
-		 	
-		//clamping the kernel size to avoid hard shadows at close ranges
-		//diskRadius *= clamp(distances.x, NGSS_PCSS_FILTER_POINT_MIN, NGSS_PCSS_FILTER_POINT_MAX);
-		
-		diskRadius *= ((coord.z - distances.x)/(distances.x));
+		if(!distances.y)
+			return 1;
+		if(distances.y == 16)
+			return 0;
 
+		diskRadius *= (coord.z - distances.x)/(distances.x);
 		half shadow = PCF_FILTER_SPOT(coord, diskRadius, c, s);
 	#else
 		diskRadius *= 0.025;
-				
-		#if defined(NGSS_USE_EARLY_BAILOUT_OPTIMIZATION)
-		half shadowTest = PCF_FILTER_SPOT_TEST(coord, diskRadius, c, s);
-		if (shadowTest == 0.0)//If all pixels are shadowed early bail out
-			return 0.0;
-		else if (shadowTest == 1.0)//If all pixels are lit early bail out
-			return 1.0;
-		#endif
 		half shadow = PCF_FILTER_SPOT(coord, diskRadius, c, s);
 	#endif
 
@@ -490,7 +452,7 @@ float3 LocalRandDir(float3 seed)
 	#if (SHADER_TARGET < 30  || UNITY_VERSION <= 565 || defined(SHADER_API_D3D9) || defined(SHADER_API_GLES) || defined(SHADER_API_PSP2) || defined(SHADER_API_N3DS))
 		//#define NO_INLINE_SAMPLERS_SUPPORT
 	#else
-		#define NGSS_CAN_USE_PCSS_FILTER
+		#define SOFTSHADOW_CAN_USE_PCSS_FILTER
 		SamplerState my_point_clamp_smp;
 	#endif
 	
@@ -548,7 +510,7 @@ float3 LocalRandDir(float3 seed)
 	inline half UnitySampleShadowmap(float3 vec)//, float4 screenPos) //screenPos the same pos as when fetching screen space shadow mask
 	{
 		
-	#if defined(NO_NGSS_SUPPORT)
+	#if defined(NO_SOFTSHADOW_SUPPORT)
 		return 1.0;
 	#endif
 
@@ -568,7 +530,6 @@ float3 LocalRandDir(float3 seed)
 		#endif
 	#endif//SHADOWS_CUBE_IN_DEPTH_TEX
 
-	#if defined(NGSS_USE_POISSON_SAMPLING)
 		float3 wpos = vec + _LightPositionRange.xyz;
 		float4 cpos = UnityWorldToClipPos(wpos);
 		float4 spos = ComputeScreenPos(cpos);
@@ -579,13 +540,11 @@ float3 LocalRandDir(float3 seed)
 
 		spos.xyz /= spos.w;
 		float4 rotation = tex2D(unity_RandomRotation16, spos.xy);// wpos.xy / wpos.z gives static patterns at close range (needs to be scaled with screen depth);
-		//float4 rotation = tex2D(NGSS_NOISE_TEXTURE, spos.xy * _ScreenParams.zw);
+		//float4 rotation = tex2D(SOFTSHADOW_NOISE_TEXTURE, spos.xy * _ScreenParams.zw);
 		//float fragDist = 1.0 - (length(wpos - _WorldSpaceCameraPos.xyz) * _LightPositionRange.w);
 		
 		float3 randDir = LocalRandDir(rotation.xyz);
-	#else
-		float3 randDir = frac(vec.xyz);
-	#endif
+
 		
 		// Tangent plane
 		float3 xaxis = normalize(cross(vec, randDir));
@@ -595,7 +554,7 @@ float3 LocalRandDir(float3 seed)
 		
 		float diskRadius = (1 - _LightShadowData.r);
 		
-	#if defined(SHADOWS_SOFT)// && defined (NGSS_CAN_USE_PCSS_FILTER)
+	#if defined(SHADOWS_SOFT)// && defined (SOFTSHADOW_CAN_USE_PCSS_FILTER)
 
 		//Multi-tap Shadows (PCSS)
 
@@ -607,12 +566,9 @@ float3 LocalRandDir(float3 seed)
 		//float3x3 rotMat = float3x3(c, -s, 0,    s, c, 0,    0, 0, 1);//rotation around Z axis
 		//float s = sin(angle);
 		//float c = cos(angle);
-		
-		#if defined(NGSS_USE_EARLY_BAILOUT_OPTIMIZATION)
-			diskRadius *= 0.25;
-		#else
-			diskRadius *= 0.5;
-		#endif
+
+		diskRadius *= 0.25;
+
 		
 		xaxis *= diskRadius;
 		yaxis *= diskRadius;
@@ -631,62 +587,37 @@ float3 LocalRandDir(float3 seed)
             half myOffsetDist = computeShadowDist(vecOffset);
 			//Can speeded up with Gather and GatherRed (they can sample 4 surrounding pixels at the same time at once)
 			half closestDepth = _ShadowMapTexture.SampleLevel(my_point_clamp_smp, vecOffset, 0.0);
-			
 			#if defined(UNITY_REVERSED_Z)
-			//closestDepth = 1.0 - closestDepth;
-			#endif
-			
-			//blockerCount++;
-			//avgBlockerDistance += closestDepth;
-			
-			#if defined(NGSS_USE_EARLY_BAILOUT_OPTIMIZATION)
-			#if defined(UNITY_REVERSED_Z)
-				if (closestDepth >= myOffsetDist)//mydist)
+				bool x = step(myOffsetDist, closestDepth);
 			#else
-				if (closestDepth <= myOffsetDist)//mydist)
+				bool x =  step(closestDepth, myOffsetDist);
 			#endif
-				{
-			#endif
-					blockerCount++;
-					avgBlockerDistance += closestDepth;
-			#if defined(NGSS_USE_EARLY_BAILOUT_OPTIMIZATION)
-				}
-			#endif
+				blockerCount+= x;
+				avgBlockerDistance += x * closestDepth;
+
 			
 		#else// NO SHADOWS_CUBE_IN_DEPTH_TEX		
 			half closestDepth = SampleCubeDistance(vecOffset).r;	
 
-			#if defined(NGSS_USE_EARLY_BAILOUT_OPTIMIZATION)
-				if (closestDepth < mydist)
-				{
-			#endif//NGSS_USE_EARLY_BAILOUT_OPTIMIZATION
-					blockerCount++;
-					avgBlockerDistance += closestDepth;
-			#if defined(NGSS_USE_EARLY_BAILOUT_OPTIMIZATION)
-				}
-			#endif
+
+				bool x = step(closestDepth, mydist)
+
+					blockerCount += x;
+					avgBlockerDistance += closestDepth * x;
+
 		#endif//SHADOWS_CUBE_IN_DEPTH_TEX
 		
 		}
 		
-		#if defined(NGSS_USE_EARLY_BAILOUT_OPTIMIZATION)
-		if( blockerCount == 0.0 )//There are no occluders so early out (this saves filtering)
+		#if defined(SOFTSHADOW_USE_EARLY_BAILOUT_OPTIMIZATION)
+		if(!blockerCount)//There are no occluders so early out (this saves filtering)
 			return 1.0;
 		else if (blockerCount == 16.0)//There are 100% occluders so early out (this saves filtering)
 			return 0.0;
 		#endif
 		
 		float dist = avgBlockerDistance / blockerCount;
-		
-		//dist = 1.0 - dist;
-		//dist = _LightProjectionParams.y / (dist + _LightProjectionParams.x);//Convert from light to world space
-		//clamping the kernel size to avoid hard shadows at close ranges
-		//diskRadius *= clamp(dist, NGSS_PCSS_FILTER_POINT_MIN, NGSS_PCSS_FILTER_POINT_MAX);
-		#if (UNITY_VERSION <= 565 || UNITY_VERSION == 20171 || UNITY_VERSION == 201711 || UNITY_VERSION == 201712 || UNITY_VERSION == 201713 || UNITY_VERSION == 20172 || UNITY_VERSION == 201721 || UNITY_VERSION == 201722)
-		half diskRadiusPCF = ((mydist - dist)/(mydist));
-		#else
 		half diskRadiusPCF = ((mydist - dist)/(dist));
-		#endif
 				
 		//PCF FILTERING
 		for (int j = 0; j < Samplers_Count; ++j)
@@ -705,8 +636,8 @@ float3 LocalRandDir(float3 seed)
 			
 			float closestDepth = SampleCubeDistance(vec + sampleDir * diskRadiusPCF).r;
 
-			#if defined(NGSS_USE_BIAS_FADE)
-			float shadowsFade = NGSS_BIAS_FADE * _LightPositionRange.w;
+			#if defined(SOFTSHADOW_USE_BIAS_FADE)
+			float shadowsFade = SOFTSHADOW_BIAS_FADE * _LightPositionRange.w;
 			shadow += 1 - saturate((mydist - closestDepth) / shadowsFade);
 			#else
 			shadow += (mydist - closestDepth < 0.0) ? 1.0 : 0.0;
@@ -726,7 +657,7 @@ float3 LocalRandDir(float3 seed)
 		yaxis *= diskRadius;
 		
 		//EARLY BAILING OUT
-		#if defined(NGSS_USE_EARLY_BAILOUT_OPTIMIZATION)		
+		#if defined(SOFTSHADOW_USE_EARLY_BAILOUT_OPTIMIZATION)		
 		float shadowTest = 0.0;
 		
 		for (int i = 0; i < 16; ++i)
@@ -753,7 +684,7 @@ float3 LocalRandDir(float3 seed)
 		else if (shadowTest == 16.0)//If all pixels are lit early bail out
 			return 1.0;
 			
-		#endif//NGSS_USE_EARLY_BAILOUT_OPTIMIZATION
+		#endif//SOFTSHADOW_USE_EARLY_BAILOUT_OPTIMIZATION
 				
 		//PCF FILTERING
 		for (int j = 0; j < Samplers_Count; ++j)
@@ -771,8 +702,8 @@ float3 LocalRandDir(float3 seed)
 			
 			float closestDepth = SampleCubeDistance(vec + sampleDir).r;
 
-			#if defined(NGSS_USE_BIAS_FADE)
-			float shadowsFade = NGSS_BIAS_FADE * _LightPositionRange.w;
+			#if defined(SOFTSHADOW_USE_BIAS_FADE)
+			float shadowsFade = SOFTSHADOW_BIAS_FADE * _LightPositionRange.w;
 			shadow += 1 - saturate((mydist - closestDepth) / shadowsFade);
 			#else
 			shadow += (mydist - closestDepth < 0.0) ? 1.0 : 0.0;
